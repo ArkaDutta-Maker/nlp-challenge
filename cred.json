@@ -1,0 +1,25 @@
+{
+  "users": {
+    "john": {
+      "password": "password123",
+      "name": "John Doe",
+      "role": "IT-Admin",
+      "id": "EMP_0921",
+      "allowed_domains": ["IT Service Desk", "Developer Support"]
+    },
+    "sarah": {
+      "password": "hrpass",
+      "name": "Sarah Smith",
+      "role": "HR Manager",
+      "id": "EMP_1145",
+      "allowed_domains": ["HR Operations"]
+    },
+    "mike": {
+      "password": "devpass",
+      "name": "Mike Ross",
+      "role": "Lead Developer",
+      "id": "EMP_3321",
+      "allowed_domains": ["Developer Support", "IT Service Desk"]
+    }
+  }
+}
