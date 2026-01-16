@@ -189,12 +189,15 @@ def process_query(query: str, domain: str, user_id: str, session_id: str, agent,
                     "context": f"User ID: {user_id}, Domain: {domain}"
                 })
                 
-                result["reasoning_steps"].append(f"   Raw LLM response: {raw_res[:100]}...")
+                result["reasoning_steps"].append(f"   Raw LLM response: {raw_res[:150]}...")
                 
                 # Parse the JSON response
                 import ast
+                import re
                 text = raw_res.strip().replace("```json", "").replace("```", "").strip()
                 
+                # Try multiple parsing methods
+                tool_info = None
                 try:
                     tool_info = json.loads(text)
                 except json.JSONDecodeError:
@@ -202,59 +205,68 @@ def process_query(query: str, domain: str, user_id: str, session_id: str, agent,
                         tool_info = ast.literal_eval(text)
                     except:
                         # Try to extract JSON from the response
-                        import re
-                        json_match = re.search(r'\{[^{}]*\}', text)
+                        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}', text, re.DOTALL)
                         if json_match:
-                            tool_info = json.loads(json_match.group())
-                        else:
-                            tool_info = {"tool": "unknown", "parameters": {"raw_query": query}}
+                            try:
+                                tool_info = json.loads(json_match.group())
+                            except:
+                                pass
+                
+                if not tool_info:
+                    tool_info = {"tool": "general_request", "parameters": {"request": query}}
                 
                 # Build the action JSON response
-                action = tool_info.get("tool", "unknown")
+                action = tool_info.get("tool", "general_request")
                 params = tool_info.get("parameters", {})
                 
+                # Clean up action name (remove "none" fallback)
+                if action == "none" or not action:
+                    action = "general_request"
+                    params = {"request": query}
+                
+                # Build clean JSON structure for judges
                 action_json = {
                     "action": action,
                     "parameters": params,
-                    "metadata": {
-                        "requester_id": user_id,
+                    "request_info": {
+                        "user_id": user_id,
                         "domain": domain,
                         "timestamp": datetime.now().isoformat(),
-                        "status": "pending"
+                        "status": "ready_for_execution"
                     }
                 }
                 
                 # Add API endpoint based on action type
-                if action in ["create_ticket", "password_reset", "software_request", "troubleshoot", "system_status"]:
-                    action_json["api"] = {
+                if action in ["create_ticket", "password_reset", "software_request", "troubleshoot", "system_status", "check_status", "escalate"]:
+                    action_json["api_endpoint"] = {
                         "service": "IT Service Desk",
-                        "endpoint": f"/api/v1/it/{action}",
+                        "url": f"/api/v1/it/{action}",
                         "method": "POST"
                     }
                 elif action in ["schedule_meeting", "leave_application", "policy_query", "benefits_info", "payroll_query", "employee_lookup"]:
-                    action_json["api"] = {
+                    action_json["api_endpoint"] = {
                         "service": "HR Operations",
-                        "endpoint": f"/api/v1/hr/{action}",
+                        "url": f"/api/v1/hr/{action}",
                         "method": "POST"
                     }
                 elif action in ["code_review", "api_docs", "deploy_request"]:
-                    action_json["api"] = {
+                    action_json["api_endpoint"] = {
                         "service": "Developer Support",
-                        "endpoint": f"/api/v1/dev/{action}",
+                        "url": f"/api/v1/dev/{action}",
                         "method": "POST"
                     }
                 else:
-                    action_json["api"] = {
-                        "service": "General",
-                        "endpoint": f"/api/v1/actions/{action}",
+                    action_json["api_endpoint"] = {
+                        "service": "Enterprise Assistant",
+                        "url": f"/api/v1/actions/{action}",
                         "method": "POST"
                     }
                 
                 result["action_json"] = action_json
                 result["tool_calls"] = [tool_info]
                 
-                # Format answer as clean JSON display
-                result["answer"] = f"```json\n{json.dumps(action_json, indent=2)}\n```"
+                # Format answer as clean JSON display for the chat
+                result["answer"] = f"**✅ Action Detected: `{action}`**\n\n```json\n{json.dumps(action_json, indent=2)}\n```"
                 result["reasoning_steps"].append(f"   ✅ Action detected: {action}")
                     
             except Exception as e:
@@ -266,15 +278,15 @@ def process_query(query: str, domain: str, user_id: str, session_id: str, agent,
                 # Return error as JSON
                 error_json = {
                     "error": str(e),
-                    "query": query,
+                    "original_query": query,
                     "status": "failed"
                 }
                 result["action_json"] = error_json
-                result["answer"] = f"```json\n{json.dumps(error_json, indent=2)}\n```"
+                result["answer"] = f"**❌ Error Processing Command**\n\n```json\n{json.dumps(error_json, indent=2)}\n```"
         else:
             error_json = {"error": "Agent not initialized", "status": "failed"}
             result["action_json"] = error_json
-            result["answer"] = f"```json\n{json.dumps(error_json, indent=2)}\n```"
+            result["answer"] = f"**❌ System Error**\n\n```json\n{json.dumps(error_json, indent=2)}\n```"
         
         return result
     

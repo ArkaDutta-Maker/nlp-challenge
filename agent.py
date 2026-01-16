@@ -231,75 +231,79 @@ Return strictly valid JSON: {{"score": "yes"}} or {{"score": "no"}}.""",
         
         # Tool Detection Chain - Enhanced for all tool actions
         self.tool_prompt = PromptTemplate(
-            template="""Analyze the user's question and determine if a specific action/tool is needed.
+            template="""You are an ACTION DETECTOR. Analyze the user's command and return the appropriate action JSON.
 
 Domain: {domain}
-Question: {question}
-Conversation Context: {context}
+User Command: {question}
+Context: {context}
 
 == IT SERVICE DESK ACTIONS ==
-- "create_ticket": User wants to create/open a support ticket, report an issue
+- "create_ticket": Create/open a support ticket, report an issue
   Parameters: issue (string), category (network/email/software/hardware/access/security), priority (low/medium/high/critical), description (string)
   
-- "check_status": User wants to check ticket status, view their tickets
+- "check_status": Check ticket status, view tickets
   Parameters: ticket_id (string, optional), user_id (string)
   
-- "password_reset": User needs password reset, locked out, forgot password
+- "password_reset": Password reset, locked out, forgot password
   Parameters: target_system (AD/email/vpn/application), reason (string)
   
-- "software_request": User needs software/application installed
+- "software_request": Software/application installation request
   Parameters: software_name (string), justification (string)
   
-- "troubleshoot": User has a technical issue and needs help troubleshooting
+- "troubleshoot": Technical issue troubleshooting
   Parameters: category (network/email/software/hardware/printer/vpn/password), symptoms (string)
   
-- "system_status": User wants to know if systems are working
+- "system_status": Check if systems are working
   Parameters: system (string, optional - email_server/vpn/active_directory/file_server/intranet)
   
-- "escalate": User wants to escalate an existing ticket
+- "escalate": Escalate an existing ticket
   Parameters: ticket_id (string), reason (string)
-  
-- "knowledge": User wants to search knowledge base or get help article
-  Parameters: topic (string)
-
-== DEVELOPER SUPPORT ACTIONS ==
-- "code_explanation": User wants code explained
-  Parameters: code (string), language (string)
-  
-- "suggest_fix": User wants bug fix suggestions
-  Parameters: code (string), error (string)
-  
-- "api_docs": User needs API documentation
-  Parameters: endpoint (string), method (string)
-  
-- "code_review": User wants code reviewed
-  Parameters: code (string), language (string)
 
 == HR OPERATIONS ACTIONS ==
-- "leave_application": User wants to apply for leave
+- "schedule_meeting": Schedule/book a meeting with someone
+  Parameters: attendees (list of strings), subject (string), date (string, optional), time (string, optional), duration (string, optional)
+  Example: "Schedule a meeting with HR" -> {{"tool": "schedule_meeting", "parameters": {{"attendees": ["HR"], "subject": "Meeting request"}}}}
+  
+- "leave_application": Apply for leave/time off
   Parameters: leave_type (string), start_date (string), end_date (string), reason (string)
   
-- "policy_query": User asking about company policies
+- "policy_query": Ask about company policies
   Parameters: policy_type (string)
   
-- "benefits_info": User asking about employee benefits
+- "benefits_info": Ask about employee benefits
   Parameters: benefit_type (string)
   
-- "payroll_query": User asking about salary/payroll
+- "payroll_query": Ask about salary/payroll
   Parameters: query_type (string)
+  
+- "employee_lookup": Look up employee information
+  Parameters: employee_name (string), info_type (string)
 
-IMPORTANT: 
-- Return {{"tool": "none"}} if this is a general question that should use document retrieval
-- Extract relevant parameters from the user's question
-- If the user is describing an IT issue, use "troubleshoot" action first to provide immediate help
+== DEVELOPER SUPPORT ACTIONS ==
+- "code_review": Code review request
+  Parameters: code (string), language (string)
+  
+- "api_docs": API documentation request
+  Parameters: endpoint (string), method (string)
+  
+- "deploy_request": Deployment request
+  Parameters: environment (string), version (string), service (string)
 
-Return strictly valid JSON with "tool" and "parameters" fields.
-Examples:
-- {{"tool": "troubleshoot", "parameters": {{"category": "network", "symptoms": "cannot connect to wifi"}}}}
-- {{"tool": "create_ticket", "parameters": {{"issue": "Laptop not starting", "category": "hardware", "priority": "high"}}}}
-- {{"tool": "none"}}
+RULES:
+1. ALWAYS detect an action from the command - do NOT return "none" for action commands
+2. Extract all relevant parameters from the user's command
+3. For meeting requests, always use "schedule_meeting"
+4. Return ONLY valid JSON, no other text
 
-Response:""",
+EXAMPLES:
+- "Schedule a meeting with HR" -> {{"tool": "schedule_meeting", "parameters": {{"attendees": ["HR"], "subject": "Meeting request"}}}}
+- "Book a meeting with John tomorrow" -> {{"tool": "schedule_meeting", "parameters": {{"attendees": ["John"], "subject": "Meeting", "date": "tomorrow"}}}}
+- "Reset my password" -> {{"tool": "password_reset", "parameters": {{"target_system": "AD", "reason": "user request"}}}}
+- "Create a ticket for my broken laptop" -> {{"tool": "create_ticket", "parameters": {{"issue": "broken laptop", "category": "hardware", "priority": "medium"}}}}
+- "Apply for leave next week" -> {{"tool": "leave_application", "parameters": {{"leave_type": "personal", "start_date": "next week"}}}}
+- "Install VS Code on my machine" -> {{"tool": "software_request", "parameters": {{"software_name": "VS Code", "justification": "development work"}}}}
+
+Return ONLY the JSON object:""",
             input_variables=["domain", "question", "context"]
         )
         self.tool_chain = self.tool_prompt | self.llm_router | StrOutputParser()
