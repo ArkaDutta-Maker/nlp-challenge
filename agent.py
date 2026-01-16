@@ -19,6 +19,7 @@ from langgraph.graph import StateGraph, END
 from tools.it_service_desk import ITServiceDeskTool
 from tools.developer_support import DeveloperSupportTool
 from tools.hr_operations import HROperationsTool
+from tools.web_search import extract_and_search_hyperlinks, web_search_action
 
 
 # --- HELPER FUNCTIONS ---
@@ -64,6 +65,7 @@ class AgentState(TypedDict):
     tool_calls: List[Dict]  # For tracking tool usage
     tool_result: Dict  # Result from tool execution
     reasoning_steps: List[str]  # For inspector panel
+    web_search_results: str  # Results from web search
 
 
 class ByteMeAgent:
@@ -111,34 +113,58 @@ class ByteMeAgent:
         
         # Domain-specific system prompts
         self.domain_prompts = {
-            "IT Service Desk": """You are an IT Service Desk assistant. You help with:
+            "IT Service Desk": """You are a CONFIDENT and AUTHORITATIVE IT Service Desk assistant. 
+
+COMMUNICATION STYLE:
+- NEVER use hedging language like "it appears", "it seems", "I think", "probably", "might be", "could be", "possibly"
+- ALWAYS speak with certainty: "This is...", "The solution is...", "You need to...", "The issue is..."
+- State facts directly and provide clear, actionable guidance
+
+You help with:
 - Troubleshooting technical issues
-- Creating support tickets
+- Creating support tickets  
 - Software installation requests
 - Password resets and access issues
 - Network and connectivity problems
-Be professional, follow ITIL best practices, and always offer to create a ticket if the issue cannot be resolved immediately.""",
+
+Be professional, follow ITIL best practices, and offer to create a ticket if the issue cannot be resolved immediately.""",
             
-            "Developer Support": """You are a Developer Support assistant. You help with:
+            "Developer Support": """You are a CONFIDENT and EXPERT Developer Support assistant.
+
+COMMUNICATION STYLE:
+- NEVER use hedging language like "it appears", "it seems", "I think", "probably", "might be", "could be"
+- ALWAYS speak with technical authority: "The code does...", "This function...", "The solution is...", "You should..."
+- State technical facts directly and confidently
+
+You help with:
 - Explaining legacy code and documentation
 - Suggesting code fixes and improvements
 - Debugging assistance
 - API documentation and usage
 - Best practices and code review
-Provide code examples when helpful and explain technical concepts clearly.""",
+
+Provide code examples when helpful and explain technical concepts with confidence and clarity.""",
             
-            "HR Operations": """You are an HR Operations assistant. You help with:
+            "HR Operations": """You are a CONFIDENT and KNOWLEDGEABLE HR Operations assistant.
+
+COMMUNICATION STYLE:
+- NEVER use hedging language like "it appears", "it seems", "I believe", "probably", "might be"
+- ALWAYS speak with clarity: "The policy states...", "You are entitled to...", "The process is...", "According to company guidelines..."
+- State HR information and policies directly and confidently
+
+You help with:
 - Company policy questions
 - Leave application guidance
 - Benefits information
 - Onboarding procedures
 - Performance review processes
-Be empathetic, maintain confidentiality, and direct sensitive matters to HR personnel when appropriate."""
+
+Be professional, maintain confidentiality, and direct sensitive matters to HR personnel when appropriate."""
         }
         
         # RAG Chain with Memory Context
         self.rag_prompt = PromptTemplate(
-            template="""You are a helpful enterprise assistant with access to document context and conversation history.
+            template="""You are a confident, knowledgeable enterprise assistant with access to document context and conversation history.
 
 {domain_system_prompt}
 
@@ -153,14 +179,16 @@ Be empathetic, maintain confidentiality, and direct sensitive matters to HR pers
 
 ❓ CURRENT QUESTION: {question}
 
-Instructions:
-- Use the document context as your primary source
+CRITICAL INSTRUCTIONS:
+- Use the document context as your primary source of truth
+- Answer with CONFIDENCE and AUTHORITY - state facts directly without hedging
+- NEVER use phrases like "it appears", "it seems", "I think", "probably", "might be", "could be", "possibly"
+- ALWAYS use definitive language: "The document states...", "According to the report...", "This is...", "The answer is..."
 - Reference conversation history to maintain context continuity
-- If the question refers to previous answers, use the memory
 - Be concise, accurate, and professional
-- If you cannot find relevant information, say so honestly
+- If information is genuinely not in the documents, clearly state: "This information is not present in the available documents."
 
-Answer:""",
+Provide a direct, confident answer:""",
             input_variables=["domain_system_prompt", "context", "memory_context", "long_term_memory", "question"]
         )
         self.rag_chain = self.rag_prompt | self.llm_gen | StrOutputParser()
@@ -290,14 +318,15 @@ The user is asking about your previous conversation or wants you to recall/summa
 
 ❓ USER'S REQUEST: {question}
 
-Instructions:
+CRITICAL INSTRUCTIONS:
 - Answer based ONLY on the conversation history provided above
-- If asking for a summary, provide a concise summary of the key points discussed
-- If asking about something specific from the conversation, find and reference it
-- If the conversation history is empty or doesn't contain relevant info, politely say so
-- Be helpful and conversational
+- Speak with CONFIDENCE - state what was discussed directly
+- NEVER use hedging phrases like "it appears", "it seems", "I believe", "probably"
+- Use definitive language: "We discussed...", "You asked about...", "I explained that..."
+- If asking for a summary, provide a clear, concise summary of key points
+- If conversation history is empty, state clearly: "We haven't discussed this topic yet."
 
-Answer:""",
+Direct answer:""",
             input_variables=["domain_system_prompt", "memory_context", "long_term_memory", "question"]
         )
         self.memory_answer_chain = self.memory_answer_prompt | self.llm_gen | StrOutputParser()
@@ -316,13 +345,15 @@ The user is asking about content from a specific page in the document.
 
 ❓ USER'S QUESTION: {question}
 
-Instructions:
-- Answer based on the page content provided above
-- Reference the page number in your response when appropriate
-- If the page content doesn't fully answer the question, mention what information is available
-- Be helpful and provide relevant details from the page
+CRITICAL INSTRUCTIONS:
+- Answer with CONFIDENCE based on the page content provided
+- NEVER use hedging phrases like "it appears", "it seems", "I think", "probably", "might be"
+- Use DEFINITIVE language: "Page {page_number} shows...", "On this page...", "The content states..."
+- Reference the page number directly in your response
+- State facts as facts - you have the actual page content
+- If specific information is not on this page, state clearly: "This information is not present on page {page_number}."
 
-Answer:""",
+Direct, confident answer:""",
             input_variables=["domain_system_prompt", "page_number", "page_content", "memory_context", "question"]
         )
         self.page_answer_chain = self.page_answer_prompt | self.llm_gen | StrOutputParser()
@@ -820,7 +851,7 @@ Answer:""",
             reasoning = ["❌ Max retries reached"]
             
             return {
-                "generation": "I apologize, but I couldn't find relevant information to answer your question. Please try rephrasing or provide more details.",
+                "generation": "The requested information is not available in the current documents. Please provide more specific details or try a different query.",
                 "should_store_memory": False,
                 "is_grounded": False,
                 "reasoning_steps": state.get("reasoning_steps", []) + reasoning
@@ -830,8 +861,8 @@ Answer:""",
             """Verify answer grounding"""
             reasoning = ["🛡️ Verifying answer grounding..."]
             
-            if "I apologize" in state["generation"] or "couldn't find" in state["generation"]:
-                reasoning.append("   - Fallback response detected")
+            if "not available" in state["generation"].lower() or "not present" in state["generation"].lower():
+                reasoning.append("   - Information not found response detected")
                 return {
                     "is_grounded": False,
                     "reasoning_steps": state.get("reasoning_steps", []) + reasoning
@@ -853,12 +884,97 @@ Answer:""",
             except:
                 pass
             
-            reasoning.append("   - ⚠ Answer may not be fully grounded")
+            reasoning.append("   - ⚠ Additional verification needed")
             return {
                 "is_grounded": False,
-                "generation": state["generation"] + "\n\n⚠️ Note: This response may not be fully verified against the source documents.",
+                "generation": state["generation"],
                 "reasoning_steps": state.get("reasoning_steps", []) + reasoning
             }
+        
+        def web_search_node(state: AgentState) -> Dict:
+            """Search web content from hyperlinks found in the answer and enhance the response."""
+            reasoning = ["🌐 Searching for hyperlinks in answer..."]
+            
+            try:
+                current_answer = state.get("generation", "")
+                reasoning.append(f"   - Analyzing answer (length: {len(current_answer)})")
+                
+                if current_answer:
+                    # Extract and fetch web content
+                    web_content = extract_and_search_hyperlinks(current_answer)
+                    
+                    if web_content.strip():
+                        reasoning.append("   - ✓ Found hyperlinks, fetched web content")
+                        reasoning.append(f"   - Web content length: {len(web_content)}")
+                        
+                        # Re-generate an enhanced answer that incorporates web content
+                        try:
+                            enhance_prompt = PromptTemplate(
+                                template="""You are a confident, authoritative assistant. The user asked a question and you have both document information AND live content from the referenced URL.
+
+**User Question:** {question}
+
+**Initial Answer (from documents):** {initial_answer}
+
+**Live Content Retrieved from the URL:**
+{web_content}
+
+Provide an **enhanced, confident answer** following these CRITICAL rules:
+1. State facts DIRECTLY and CONFIDENTLY - never hedge
+2. NEVER use phrases like "it appears", "it seems", "I think", "probably", "might be", "could be"
+3. USE definitive language: "The link leads to...", "The webpage contains...", "This page offers...", "You will find..."
+4. Integrate the URL content naturally into your answer
+5. Tell the user exactly what they will see when they visit the link
+6. Be well-formatted and professional
+
+Confident, enhanced answer:""",
+                                input_variables=["question", "initial_answer", "web_content"]
+                            )
+                            
+                            enhance_chain = enhance_prompt | self.llm_gen | StrOutputParser()
+                            
+                            enhanced_answer = enhance_chain.invoke({
+                                "question": state.get("original_question", state.get("question", "")),
+                                "initial_answer": current_answer,
+                                "web_content": web_content
+                            })
+                            
+                            reasoning.append("   - ✓ Enhanced answer with web content")
+                            
+                            return {
+                                "generation": enhanced_answer,
+                                "web_search_results": web_content,
+                                "reasoning_steps": state.get("reasoning_steps", []) + reasoning
+                            }
+                        except Exception as enhance_error:
+                            reasoning.append(f"   - ⚠ Enhancement failed, appending web content: {str(enhance_error)}")
+                            # Fallback: just append web content
+                            enhanced_answer = current_answer + "\n\n---\n**📌 Additional Context from the Link:**\n" + web_content
+                            return {
+                                "generation": enhanced_answer,
+                                "web_search_results": web_content,
+                                "reasoning_steps": state.get("reasoning_steps", []) + reasoning
+                            }
+                    else:
+                        reasoning.append("   - No hyperlinks found or web content unavailable")
+                        return {
+                            "web_search_results": "",
+                            "reasoning_steps": state.get("reasoning_steps", []) + reasoning
+                        }
+                else:
+                    reasoning.append("   - No answer to search for hyperlinks")
+                    return {
+                        "web_search_results": "",
+                        "reasoning_steps": state.get("reasoning_steps", []) + reasoning
+                    }
+                    
+            except Exception as e:
+                reasoning.append(f"   - ❌ Web search failed: {str(e)}")
+                print(f"Web search error details: {e}")  # Additional console logging
+                return {
+                    "web_search_results": "",
+                    "reasoning_steps": state.get("reasoning_steps", []) + reasoning
+                }
         
         def memory_storage_node(state: AgentState) -> Dict:
             """Store successful exchange to memory"""
@@ -900,6 +1016,7 @@ Answer:""",
         workflow.add_node("rewrite", rewrite_node)
         workflow.add_node("generate", generate_node)
         workflow.add_node("reflect", reflection_node)
+        workflow.add_node("web_search", web_search_node)
         workflow.add_node("memory_storage", memory_storage_node)
         workflow.add_node("fail", graceful_fail_node)
         
@@ -943,7 +1060,8 @@ Answer:""",
         
         # Generate path (no tool execution in between)
         workflow.add_edge("generate", "reflect")
-        workflow.add_edge("reflect", "memory_storage")
+        workflow.add_edge("reflect", "web_search")
+        workflow.add_edge("web_search", "memory_storage")
         workflow.add_edge("memory_storage", END)
         workflow.add_edge("fail", END)
         
@@ -989,7 +1107,8 @@ Answer:""",
                 "tool_result": {},  # Added for tool execution
                 "reasoning_steps": [],
                 "document_sources": [],
-                "retrieval_results": []
+                "retrieval_results": [],
+                "web_search_results": ""  # Added for web search
             })
             
             # Process documents for preview with source information
@@ -1017,7 +1136,8 @@ Answer:""",
                 "tool_result": result.get("tool_result", {}),  # Include tool result
                 "reasoning_steps": result.get("reasoning_steps", []),
                 "documents": processed_docs,
-                "document_sources": result.get("document_sources", [])
+                "document_sources": result.get("document_sources", []),
+                "web_search_results": result.get("web_search_results", "")  # Include web search
             }
             
         except Exception as e:
