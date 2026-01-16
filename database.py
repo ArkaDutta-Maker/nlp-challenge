@@ -141,6 +141,27 @@ class DatabaseManager:
                 )
             """)
             
+            # Chat history table for persistence
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_history (
+                    id SERIAL PRIMARY KEY,
+                    user_id VARCHAR(50) NOT NULL,
+                    domain VARCHAR(100) NOT NULL,
+                    session_name VARCHAR(200) NOT NULL,
+                    messages JSONB NOT NULL DEFAULT '[]',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                    UNIQUE(user_id, domain, session_name)
+                )
+            """)
+            
+            # Index for faster chat retrieval
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_chat_user_domain 
+                ON chat_history(user_id, domain)
+            """)
+            
             print("   ✓ Database tables initialized")
     
     def is_connected(self) -> bool:
@@ -508,6 +529,110 @@ class DatabaseManager:
                 """, (session_id, user_id))
                 return True
         except:
+            return False
+    
+    # ==================== CHAT HISTORY PERSISTENCE ====================
+    
+    def save_chat(self, user_id: str, domain: str, session_name: str, messages: List[Dict]) -> bool:
+        """
+        Save or update chat history for a user.
+        
+        Args:
+            user_id: User identifier
+            domain: Chat domain (IT Service Desk, Developer Support, HR Operations)
+            session_name: Name of the chat session
+            messages: List of message dicts with 'role' and 'content'
+            
+        Returns:
+            True if successful
+        """
+        if not self.conn:
+            return False
+        
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO chat_history (user_id, domain, session_name, messages, updated_at)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (user_id, domain, session_name)
+                    DO UPDATE SET messages = %s, updated_at = CURRENT_TIMESTAMP
+                """, (user_id, domain, session_name, Json(messages), Json(messages)))
+                return True
+        except Exception as e:
+            print(f"Error saving chat: {e}")
+            return False
+    
+    def load_user_chats(self, user_id: str) -> Dict[str, Dict[str, List[Dict]]]:
+        """
+        Load all chat history for a user.
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            Dict structured as {domain: {session_name: [messages]}}
+        """
+        if not self.conn:
+            return {}
+        
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT domain, session_name, messages
+                    FROM chat_history
+                    WHERE user_id = %s
+                    ORDER BY updated_at DESC
+                """, (user_id,))
+                
+                rows = cur.fetchall()
+                
+                # Structure: {domain: {session_name: messages}}
+                chats = {}
+                for row in rows:
+                    domain = row['domain']
+                    session_name = row['session_name']
+                    messages = row['messages'] if row['messages'] else []
+                    
+                    if domain not in chats:
+                        chats[domain] = {}
+                    chats[domain][session_name] = messages
+                
+                return chats
+        except Exception as e:
+            print(f"Error loading chats: {e}")
+            return {}
+    
+    def delete_chat(self, user_id: str, domain: str, session_name: str) -> bool:
+        """Delete a specific chat session"""
+        if not self.conn:
+            return False
+        
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM chat_history
+                    WHERE user_id = %s AND domain = %s AND session_name = %s
+                """, (user_id, domain, session_name))
+                return True
+        except Exception as e:
+            print(f"Error deleting chat: {e}")
+            return False
+    
+    def rename_chat(self, user_id: str, domain: str, old_name: str, new_name: str) -> bool:
+        """Rename a chat session"""
+        if not self.conn:
+            return False
+        
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE chat_history
+                    SET session_name = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = %s AND domain = %s AND session_name = %s
+                """, (new_name, user_id, domain, old_name))
+                return True
+        except Exception as e:
+            print(f"Error renaming chat: {e}")
             return False
     
     def close(self):
