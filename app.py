@@ -586,16 +586,16 @@ with st.sidebar:
     
     st.divider()
     
-    # 2. USER PROFILE
-    st.subheader("👤 User Profile")
-    with st.container(border=True):
-        st.markdown(f"**{user['name']}**")
-        st.caption(user['role'])
-        st.caption(f"ID: {user['id']}")
-        domain_icon = domain_icons.get(st.session_state.current_domain, "📌")
-        st.info(f"{domain_icon} {st.session_state.current_domain}")
+    # # 2. USER PROFILE
+    # st.subheader("👤 User Profile")
+    # with st.container(border=True):
+    #     st.markdown(f"**{user['name']}**")
+    #     st.caption(user['role'])
+    #     st.caption(f"ID: {user['id']}")
+    #     domain_icon = domain_icons.get(st.session_state.current_domain, "📌")
+    #     st.info(f"{domain_icon} {st.session_state.current_domain}")
     
-    st.divider()
+    # st.divider()
     
     # 3. SESSION MANAGEMENT
     st.subheader("💬 Session History")
@@ -608,8 +608,40 @@ with st.sidebar:
     
     # "New Chat" Button
     if st.button("➕ New Chat", use_container_width=True, type="primary"):
-        st.session_state.global_session_counter += 1
-        new_session_name = f"Chat {st.session_state.global_session_counter}"
+        # Find the next available chat number (smart numbering)
+        existing_numbers = []
+        for session_name in current_domain_sessions.keys():
+            if session_name.startswith("Chat "):
+                try:
+                    num = int(session_name.split(" ")[1])
+                    existing_numbers.append(num)
+                except:
+                    pass
+        
+        # Find the smallest available number starting from 1
+        if not existing_numbers:
+            next_num = 1
+        else:
+            # Find first gap or use max + 1
+            existing_numbers.sort()
+            next_num = 1
+            for num in existing_numbers:
+                if num == next_num:
+                    next_num += 1
+                else:
+                    break
+        
+        new_session_name = f"Chat {next_num}"
+        
+        # Create unique session ID including domain to avoid memory conflicts
+        unique_session_id = f"{st.session_state.current_domain}_{new_session_name}"
+        
+        # Clear any existing short-term memory for this session (in case of reuse)
+        if memory_manager:
+            memory_manager.clear_session(
+                session_id=unique_session_id,
+                user_id=user['id']
+            )
         
         st.session_state.domain_chats[st.session_state.current_domain][new_session_name] = []
         st.session_state.active_session_id = new_session_name
@@ -680,8 +712,10 @@ with st.sidebar:
             
             if st.button("🧹 Clear Memory"):
                 if memory_manager:
+                    # Use unique session ID including domain
+                    unique_session_id = f"{st.session_state.current_domain}_{st.session_state.active_session_id}"
                     memory_manager.clear_session(
-                        session_id=st.session_state.active_session_id,
+                        session_id=unique_session_id,
                         user_id=user['id']
                     )
                     st.success("Session memory cleared!")
@@ -756,10 +790,16 @@ with col_chat:
         prompt = st.chat_input(input_placeholder)
         
         if prompt:
+            # Clear previous response before processing new query
+            st.session_state.last_response = None
+            
             # Add user message
             st.session_state.domain_chats[st.session_state.current_domain][st.session_state.active_session_id].append(
                 {"role": "user", "content": prompt}
             )
+            
+            # Create unique session ID including domain to avoid memory conflicts across chats
+            unique_session_id = f"{st.session_state.current_domain}_{st.session_state.active_session_id}"
             
             # Process query with mode
             with st.spinner("🤔 Processing your request..."):
@@ -767,14 +807,14 @@ with col_chat:
                     query=prompt,
                     domain=st.session_state.current_domain,
                     user_id=user['id'],
-                    session_id=st.session_state.active_session_id,
+                    session_id=unique_session_id,  # Use unique session ID
                     agent=agent,
                     tools=tools,
                     mode="action" if chat_mode else "chat"
                 )
             
-            # Store response for inspector
-            st.session_state.last_response = response
+            # Store NEW response for inspector (force update)
+            st.session_state.last_response = dict(response)  # Create a new dict to ensure state update
             
             # Add assistant response
             st.session_state.domain_chats[st.session_state.current_domain][st.session_state.active_session_id].append(

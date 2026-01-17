@@ -168,7 +168,7 @@ Be professional, maintain confidentiality, and direct sensitive matters to HR pe
 
 {domain_system_prompt}
 
-📚 DOCUMENT CONTEXT:
+📚 DOCUMENT CONTEXT (with page numbers):
 {context}
 
 🧠 RECENT CONVERSATION:
@@ -184,11 +184,13 @@ CRITICAL INSTRUCTIONS:
 - Answer with CONFIDENCE and AUTHORITY - state facts directly without hedging
 - NEVER use phrases like "it appears", "it seems", "I think", "probably", "might be", "could be", "possibly"
 - ALWAYS use definitive language: "The document states...", "According to the report...", "This is...", "The answer is..."
+- **ALWAYS CITE PAGE NUMBERS** when referencing information from the documents. Use format: (Page X) or "As stated on Page X..."
+- If multiple pages are referenced, cite each one: "Page 12 discusses... while Page 45 mentions..."
 - Reference conversation history to maintain context continuity
 - Be concise, accurate, and professional
 - If information is genuinely not in the documents, clearly state: "This information is not present in the available documents."
 
-Provide a direct, confident answer:""",
+Provide a direct, confident answer with page citations:""",
             input_variables=["domain_system_prompt", "context", "memory_context", "long_term_memory", "question"]
         )
         self.rag_chain = self.rag_prompt | self.llm_gen | StrOutputParser()
@@ -310,7 +312,7 @@ Return ONLY the JSON object:""",
         
         # Memory-based answer chain (for conversation summary, recall, etc.)
         self.memory_answer_prompt = PromptTemplate(
-            template="""{domain_system_prompt}
+            template="""You are a helpful assistant recalling and summarizing previous conversations.
 
 The user is asking about your previous conversation or wants you to recall/summarize what was discussed.
 
@@ -327,10 +329,14 @@ CRITICAL INSTRUCTIONS:
 - Speak with CONFIDENCE - state what was discussed directly
 - NEVER use hedging phrases like "it appears", "it seems", "I believe", "probably"
 - Use definitive language: "We discussed...", "You asked about...", "I explained that..."
-- If asking for a summary, provide a clear, concise summary of key points
-- If conversation history is empty, state clearly: "We haven't discussed this topic yet."
+- Provide a clear, concise summary focusing ONLY on what was actually discussed
+- DO NOT mention what was NOT discussed (avoid "We haven't discussed X topic")
+- DO NOT offer help with unrelated topics or domains
+- DO NOT add any disclaimers about your capabilities or limitations
+- If the conversation history is completely empty, simply say: "There's no conversation history to summarize yet."
+- Keep your summary factual and focused on the actual content exchanged
 
-Direct answer:""",
+Direct summary:""",
             input_variables=["domain_system_prompt", "memory_context", "long_term_memory", "question"]
         )
         self.memory_answer_chain = self.memory_answer_prompt | self.llm_gen | StrOutputParser()
@@ -806,8 +812,29 @@ Direct, confident answer:""",
                     "You are a helpful enterprise assistant."
                 )
                 
-                # Build context from documents
-                doc_context = "\n\n".join(state.get("documents", [])) if state.get("documents") else ""
+                # Build context from documents WITH PAGE NUMBERS
+                retrieval_results = state.get("retrieval_results", [])
+                documents = state.get("documents", [])
+                
+                doc_context_parts = []
+                pages_used = []
+                for i, doc in enumerate(documents):
+                    # Get page number from retrieval results metadata
+                    page_num = "N/A"
+                    if i < len(retrieval_results):
+                        metadata = retrieval_results[i].get("metadata", {})
+                        page_num = metadata.get("page", metadata.get("page_number", "N/A"))
+                        if page_num and page_num != "N/A":
+                            pages_used.append(str(page_num))
+                    
+                    # Format document with page citation
+                    doc_context_parts.append(f"[Page {page_num}]:\n{doc}")
+                
+                doc_context = "\n\n---\n\n".join(doc_context_parts) if doc_context_parts else ""
+                
+                # Log pages being used
+                if pages_used:
+                    reasoning.append(f"   - Using content from pages: {', '.join(set(pages_used))}")
                 
                 # Include tool result if available
                 tool_result = state.get("tool_result", {})
