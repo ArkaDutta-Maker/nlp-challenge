@@ -186,11 +186,13 @@ CRITICAL INSTRUCTIONS:
 - ALWAYS use definitive language: "The document states...", "According to the report...", "This is...", "The answer is..."
 - **ALWAYS CITE PAGE NUMBERS** when referencing information from the documents. Use format: (Page X) or "As stated on Page X..."
 - If multiple pages are referenced, cite each one: "Page 12 discusses... while Page 45 mentions..."
+- **ALWAYS INCLUDE FULL URLs/LINKS** found in the documents. If you see URLs, QR codes with links like [QR: ['https://...']], or any hyperlinks, include the COMPLETE URL in your answer so users can access them
+- Format links clearly: "You can access more details at: https://example.com/..."
 - Reference conversation history to maintain context continuity
 - Be concise, accurate, and professional
 - If information is genuinely not in the documents, clearly state: "This information is not present in the available documents."
 
-Provide a direct, confident answer with page citations:""",
+Provide a direct, confident answer with page citations and include any relevant URLs:""",
             input_variables=["domain_system_prompt", "context", "memory_context", "long_term_memory", "question"]
         )
         self.rag_chain = self.rag_prompt | self.llm_gen | StrOutputParser()
@@ -360,10 +362,13 @@ CRITICAL INSTRUCTIONS:
 - NEVER use hedging phrases like "it appears", "it seems", "I think", "probably", "might be"
 - Use DEFINITIVE language: "Page {page_number} shows...", "On this page...", "The content states..."
 - Reference the page number directly in your response
+- **IMPORTANT: If you see ANY URLs or QR codes in the page content (formatted as [QR: ['https://...']] or plain URLs), you MUST include the COMPLETE URL in your answer**
+- Extract the actual URL from QR code notation: [QR: ['https://example.com']] → include https://example.com in your answer
+- Format links clearly: "The QR code links to: https://..."
 - State facts as facts - you have the actual page content
 - If specific information is not on this page, state clearly: "This information is not present on page {page_number}."
 
-Direct, confident answer:""",
+Direct, confident answer including any URLs found:""",
             input_variables=["domain_system_prompt", "page_number", "page_content", "memory_context", "question"]
         )
         self.page_answer_chain = self.page_answer_prompt | self.llm_gen | StrOutputParser()
@@ -957,6 +962,12 @@ Provide an **enhanced, confident answer** following these CRITICAL rules:
 4. Integrate the URL content naturally into your answer
 5. Tell the user exactly what they will see when they visit the link
 6. Be well-formatted and professional
+7. **ALWAYS include the source URL(s) at the end of your answer** in a clear format like:
+   📎 **Source Link:** [URL]
+   or if multiple links:
+   📎 **Source Links:**
+   - [URL1]
+   - [URL2]
 
 Confident, enhanced answer:""",
                                 input_variables=["question", "initial_answer", "web_content"]
