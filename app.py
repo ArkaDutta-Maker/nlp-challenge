@@ -878,6 +878,9 @@ with col_inspector:
         with tab2:
             st.caption("**Retrieved Context from PDF**")
             
+            # Get message count for unique keys
+            msg_count = len(st.session_state.domain_chats.get(st.session_state.current_domain, {}).get(st.session_state.active_session_id, []))
+            
             if st.session_state.last_response and st.session_state.last_response.get("documents"):
                 documents = st.session_state.last_response["documents"]
                 
@@ -907,17 +910,17 @@ with col_inspector:
                                 with col_b:
                                     st.caption(f"**Type:** {metadata.get('type', 'text')}")
                             
-                            # Show content preview
+                            # Show content preview - use unique keys with message count
                             if len(content) > 500:
                                 st.text_area(
                                     "Content",
                                     content[:500] + "\n...[truncated]",
                                     height=120,
                                     disabled=True,
-                                    key=f"doc_{i}"
+                                    key=f"doc_{i}_msg_{msg_count}"
                                 )
                             else:
-                                st.text_area("Content", content, height=100, disabled=True, key=f"doc_{i}")
+                                st.text_area("Content", content, height=100, disabled=True, key=f"doc_{i}_msg_{msg_count}")
                     
                     # Grounding indicator
                     st.divider()
